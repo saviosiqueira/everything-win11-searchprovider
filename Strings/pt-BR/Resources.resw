@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <data name="AppName" xml:space="preserve">
+    <value>Everything Provedor de Pesquisa</value>
+  </data>
+  <data name="AppDescription" xml:space="preserve">
+    <value>Redireciona as consultas de pesquisa do Windows 11 para o VoidTools Everything para pesquisa instantânea de arquivos locais.</value>
+  </data>
+</root>

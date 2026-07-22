@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{{.StrPreviewTitle}}</title>
+<style>
+/* INJECT_CSS */
+</style>
+</head>
+<body>
+<div class="card">
+  {{if .IsImage}}
+    <img class="preview-media" src="{{.ImageSrcURL}}" alt="{{.FileName}}" />
+  {{else if .IsVideo}}
+    <video class="preview-media" controls src="{{.MediaSrcURL}}"></video>
+  {{else if .IsAudio}}
+    <audio class="preview-media" controls src="{{.MediaSrcURL}}"></audio>
+  {{else}}
+    <div class="icon">{{.Icon}}</div>
+  {{end}}
+  <div class="name">{{.FileName}}</div>
+
+  {{if .TextContent}}
+    <div class="text-preview">{{.TextContent}}</div>
+  {{end}}
+
+  <dl class="row">
+    <dt class="label">{{.StrPath}}</dt>
+    <dd class="value">{{.FilePath}}</dd>
+  </dl>
+  {{if not .IsFolder}}
+  <dl class="row">
+    <dt class="label">{{.StrSize}}</dt>
+    <dd class="value">{{.FileSize}}</dd>
+  </dl>
+  {{end}}
+  <dl class="row">
+    <dt class="label">{{.StrModified}}</dt>
+    <dd class="value">{{.FileDate}}</dd>
+  </dl>
+  {{if .HasMediaInfo}}
+    {{if .MediaResolution}}
+    <dl class="row">
+      <dt class="label">{{.StrResolution}}</dt>
+      <dd class="value">{{.MediaResolution}}</dd>
+    </dl>
+    {{end}}
+    {{if .MediaDuration}}
+    <dl class="row">
+      <dt class="label">{{.StrDuration}}</dt>
+      <dd class="value">{{.MediaDuration}}</dd>
+    </dl>
+    {{end}}
+    {{if .MediaCodec}}
+    <dl class="row">
+      <dt class="label">{{.StrCodec}}</dt>
+      <dd class="value">{{.MediaCodec}}</dd>
+    </dl>
+    {{end}}
+  {{end}}
+
+  <div class="actions">
+    <a class="btn btn-primary" href="{{.FileURL}}">{{.StrOpenFile}}</a>
+    <a class="btn btn-secondary" href="{{.DirURL}}">{{.StrOpenLocation}}</a>
+  </div>
+</div>
+</body>
+</html>

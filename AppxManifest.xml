@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  AppxManifest.xml – Everything Search Provider for Windows 11
+
+  This manifest registers a local HTTPS search provider via the
+  com.microsoft.windows.websearchprovider AppExtension (EEA DMA).
+  Windows Search will route queries to our local server when this
+  package is installed and enabled.
+-->
+<Package
+  xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+  xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+  xmlns:uap3="http://schemas.microsoft.com/appx/manifest/uap/windows10/3"
+  xmlns:desktop="http://schemas.microsoft.com/appx/manifest/desktop/windows10"
+  xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+  IgnorableNamespaces="uap uap3 desktop rescap">
+
+  <Identity
+    Name="EverythingSearchProvider"
+    Publisher="CN=EverythingSearch_LocalDev_DO_NOT_TRUST"
+    Version="1.0.0.25" />
+
+  <Properties>
+    <DisplayName>ms-resource:AppName</DisplayName>
+    <PublisherDisplayName>Everything Search Provider</PublisherDisplayName>
+    <Logo>Assets\StoreLogo.png</Logo>
+  </Properties>
+
+  <Dependencies>
+    <TargetDeviceFamily
+      Name="Windows.Desktop"
+      MinVersion="10.0.19041.0"
+      MaxVersionTested="10.0.26200.0" />
+  </Dependencies>
+
+  <Resources>
+    <Resource Language="en-us" />
+    <Resource Language="es-es" />
+    <Resource Language="pt-br" />
+  </Resources>
+
+  <Applications>
+    <Application
+      Id="EverythingSearch"
+      Executable="EverythingSearch.exe"
+      EntryPoint="Windows.FullTrustApplication">
+      <uap:VisualElements
+        DisplayName="ms-resource:AppName"
+        Description="ms-resource:AppDescription"
+        Square150x150Logo="Assets\StoreLogo.png"
+        Square44x44Logo="Assets\StoreLogo.png"
+        BackgroundColor="transparent" />
+
+      <Extensions>
+
+        <!-- Web Search Provider (EEA DMA compliance feature) -->
+        <uap3:Extension Category="windows.appExtension">
+          <uap3:AppExtension
+            Name="com.microsoft.windows.websearchprovider"
+            DisplayName="Everything Search Provider"
+            Id="EverythingWebSearch"
+            PublicFolder="Public">
+            <uap3:Properties>
+              <Endpoint>https://localhost:7654/api/search</Endpoint>
+              <Protocol>everythingsearch</Protocol>
+            </uap3:Properties>
+          </uap3:AppExtension>
+        </uap3:Extension>
+
+        <!-- Protocol registration (required for search provider) -->
+        <uap:Extension Category="windows.protocol">
+          <uap:Protocol Name="everythingsearch"/>
+        </uap:Extension>
+
+        <!-- Startup Task – auto-launch the HTTPS server on user login. -->
+        <desktop:Extension Category="windows.startupTask" Executable="EverythingSearch.exe" EntryPoint="Windows.FullTrustApplication">
+          <desktop:StartupTask
+            TaskId="EverythingSearchStartup"
+            Enabled="true"
+            DisplayName="Everything Search Provider Server" />
+        </desktop:Extension>
+
+      </Extensions>
+    </Application>
+  </Applications>
+
+  <Capabilities>
+    <Capability Name="internetClient" />
+    <rescap:Capability Name="runFullTrust" />
+  </Capabilities>
+</Package>

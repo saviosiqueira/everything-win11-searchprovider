@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <data name="AppName" xml:space="preserve">
+    <value>Everything Search Provider</value>
+  </data>
+  <data name="AppDescription" xml:space="preserve">
+    <value>Routes Windows 11 search queries to VoidTools Everything for instant local file search.</value>
+  </data>
+</root>
