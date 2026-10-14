@@ -26,7 +26,7 @@ function Pass($msg)  { Write-Host "  [PASS] $msg" -ForegroundColor Green;  $scri
 function Fail($msg)  { Write-Host "  [FAIL] $msg" -ForegroundColor Red;    $script:failed += 1 }
 function Info($msg)  { Write-Host "  [----] $msg" -ForegroundColor DarkGray }
 
-# ── 1. Build (optional) ──────────────────────────────────────────────
+# ── 1. Build (optional) ──────────────────────────────────────────
 
 Write-Host ""
 Write-Host "=== Everything Search Provider — Integration Test ===" -ForegroundColor Cyan
@@ -41,7 +41,23 @@ if (-not $NoBuild) {
     Pass "Build succeeded"
 }
 
-# ── 2. Start the server ──────────────────────────────────────────────
+# ── 2. Start the server ──────────────────────────────────────────
+
+$tempEverythingProc = $null
+$esExe = ".\Output\es.exe"
+if (-not (Test-Path $esExe)) { $esExe = ".\es.exe" }
+if (Test-Path $esExe) {
+    $testEs = & $esExe -n 1 -timeout 500 test 2>&1
+    if ($LASTEXITCODE -eq 8 -or "$testEs" -match "Error 8") {
+        $evPath = "C:\Program Files\Everything\Everything.exe"
+        if (Test-Path $evPath) {
+            Info "Everything default IPC window not reachable in current desktop. Starting temporary Everything test instance..."
+            $tempEverythingProc = Start-Process -FilePath $evPath -ArgumentList "-instance test -startup" -PassThru
+            $env:EVERYTHING_INSTANCE = "test"
+            Start-Sleep -Seconds 3
+        }
+    }
+}
 
 Info "Starting server..."
 Get-Process -Name "EverythingSearch" -ErrorAction SilentlyContinue | Stop-Process -Force
@@ -62,7 +78,7 @@ if ($proc.HasExited) {
 }
 Pass "Server running (PID $($proc.Id))"
 
-# ── 3. Helper to make requests ───────────────────────────────────────
+# ── 3. Helper to make requests ───────────────────────────────────
 
 # Ignore self-signed cert errors for this test session
 if (-not ([System.Net.ServicePointManager]::ServerCertificateValidationCallback)) {
@@ -90,7 +106,7 @@ function Invoke-Test {
     }
 }
 
-# ── 4. Test: OPTIONS preflight ───────────────────────────────────────
+# ── 4. Test: OPTIONS preflight ───────────────────────────────────
 
 Info "Testing OPTIONS preflight..."
 $resp = Invoke-Test -Method OPTIONS -Url "https://localhost:7654/api/search?qry=test"
@@ -113,7 +129,7 @@ else {
     }
 }
 
-# ── 5. Test: Search and Rich Previews ───────────────────────────────────────
+# ── 5. Test: Search and Rich Previews ───────────────────────────
 
 $testDir = Join-Path $PSScriptRoot "test_files"
 $filesToTest = @()
@@ -207,14 +223,20 @@ if ($filesToTest.Count -eq 0 -and $Query) {
     }
 }
 
-# ── 8. Cleanup ───────────────────────────────────────────────────────
+# ── 8. Cleanup ──────────────────────────────────────────────────
 
 Info "Stopping server..."
 $proc | Stop-Process -Force -ErrorAction SilentlyContinue
 Remove-Item "$env:TEMP\_es_stdout.log", "$env:TEMP\_es_stderr.log" -ErrorAction SilentlyContinue
 Pass "Server stopped"
 
-# ── Summary ──────────────────────────────────────────────────────────
+if ($tempEverythingProc) {
+    Info "Stopping temporary Everything test instance..."
+    $tempEverythingProc | Stop-Process -Force -ErrorAction SilentlyContinue
+    Remove-Item Env:\EVERYTHING_INSTANCE -ErrorAction SilentlyContinue
+}
+
+# ── Summary ──────────────────────────────────────────────────────
 
 Write-Host ""
 $total = $passed + $failed

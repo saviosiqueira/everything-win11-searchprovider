@@ -93,6 +93,10 @@ func main() {
 			MinVersion:   tls.VersionTLS12,
 		},
 		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       10 * time.Second,
+		WriteTimeout:      10 * time.Second,
+		IdleTimeout:       60 * time.Second,
+		MaxHeaderBytes:    16 << 10,
 	}
 
 	log.Printf("Everything Search Provider listening on https://%s", addr)

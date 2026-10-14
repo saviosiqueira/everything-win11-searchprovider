@@ -1,12 +1,31 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"log"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
+)
+
+var (
+	searchMu           sync.Mutex
+	activeSearchCancel context.CancelFunc
+
+	openMu       sync.Mutex
+	lastOpenKey  string
+	lastOpenTime time.Time
+
+	transparentGIF = []byte{
+		0x47, 0x49, 0x46, 0x38, 0x39, 0x61, 0x01, 0x00, 0x01, 0x00, 0x80, 0x00,
+		0x00, 0x00, 0x00, 0x00, 0xff, 0xff, 0xff, 0x21, 0xf9, 0x04, 0x01, 0x00,
+		0x00, 0x00, 0x00, 0x2c, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00,
+		0x00, 0x02, 0x02, 0x44, 0x01, 0x00, 0x3b,
+	}
 )
 
 func withCORS(next http.HandlerFunc) http.HandlerFunc {
@@ -40,18 +59,49 @@ func handleSearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	results := searchCache.get(query)
+	tokens := sanitizeQuery(query)
+	if len(tokens) == 0 {
+		serveJSON(w, SuggestionResponse{Suggestions: []Suggestion{}})
+		return
+	}
+	cacheKey := strings.Join(tokens, " ")
+
+	results := searchCache.get(cacheKey)
 	if results != nil {
 		log.Printf("[SEARCH] cache hit: %d results", len(results))
 		serveJSON(w, SuggestionResponse{Suggestions: results})
 		return
 	}
 
-	results = searchEverything(query)
+	searchMu.Lock()
+	if activeSearchCancel != nil {
+		activeSearchCancel()
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 2500*time.Millisecond)
+	activeSearchCancel = cancel
+	searchMu.Unlock()
+
+	defer func() {
+		searchMu.Lock()
+		cancel()
+		searchMu.Unlock()
+	}()
+
+	results, err := searchEverything(ctx, query)
+	if err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(ctx.Err(), context.Canceled) {
+			log.Printf("[SEARCH] superseded / canceled for query %q", query)
+			return
+		}
+		log.Printf("[SEARCH] error for query %q: %v", query, err)
+		serveJSON(w, SuggestionResponse{Suggestions: []Suggestion{}})
+		return
+	}
+
 	if results == nil {
 		results = []Suggestion{}
 	}
-	searchCache.set(query, results, 1*time.Second)
+	searchCache.set(cacheKey, results, 3*time.Second)
 	log.Printf("[SEARCH] returning %d results", len(results))
 	serveJSON(w, SuggestionResponse{Suggestions: results})
 }
@@ -62,7 +112,7 @@ func handlePreview(w http.ResponseWriter, r *http.Request) {
 	filePath := r.URL.Query().Get("path")
 	log.Printf("[PREVIEW] path=%q url=\"https://%s%s\"", filePath, r.Host, r.URL.String())
 
-	data := buildPreviewData(filePath, acceptLang)
+	data := buildPreviewData(r.Context(), filePath, acceptLang)
 
 	var buf strings.Builder
 	if err := previewTmpl.Execute(&buf, data); err != nil {
@@ -82,11 +132,39 @@ func handleOpen(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "missing path parameter", http.StatusBadRequest)
 		return
 	}
-	log.Printf("[OPEN] opening file: %s", filePath)
 
-	if err := launchPath(filePath); err != nil {
-		log.Printf("[OPEN] error opening %s: %v", filePath, err)
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+	selectInExplorer := r.URL.Query().Get("select") == "1"
+	isBackground := r.URL.Query().Get("bg") == "1"
+
+	key := filePath + "|select=" + strconv.FormatBool(selectInExplorer)
+	now := time.Now()
+
+	openMu.Lock()
+	isDuplicate := (key == lastOpenKey && now.Sub(lastOpenTime) < 600*time.Millisecond)
+	if !isDuplicate {
+		lastOpenKey = key
+		lastOpenTime = now
+	}
+	openMu.Unlock()
+
+	if isDuplicate {
+		log.Printf("[OPEN] duplicate request within cooldown for %s (select=%t)", filePath, selectInExplorer)
+	} else {
+		log.Printf("[OPEN] opening file: %s (select=%t)", filePath, selectInExplorer)
+		if err := launchPath(filePath, selectInExplorer); err != nil {
+			log.Printf("[OPEN] error opening %s: %v", filePath, err)
+			if !isBackground {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+		}
+	}
+
+	if isBackground {
+		w.Header().Set("Content-Type", "image/gif")
+		w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate")
+		w.Header().Set("Content-Length", strconv.Itoa(len(transparentGIF)))
+		w.Write(transparentGIF)
 		return
 	}
 
@@ -103,10 +181,10 @@ func handleFile(w http.ResponseWriter, r *http.Request) {
 	http.ServeFile(w, r, filePath)
 }
 
-func buildPreviewData(filePath, acceptLang string) PreviewData {
+func buildPreviewData(ctx context.Context, filePath, acceptLang string) PreviewData {
 	var data PreviewData
 	if strings.TrimSpace(filePath) != "" {
-		populateFileInfo(&data, filePath)
+		populateFileInfo(ctx, &data, filePath)
 	}
 
 	if data.FileName == "" {
@@ -131,6 +209,8 @@ func buildPreviewData(filePath, acceptLang string) PreviewData {
 	data.StrDuration = getTranslation(acceptLang, "Duration")
 	data.StrCodec = getTranslation(acceptLang, "Codec")
 
+	isOfflineOrCloud := isFileOfflineOrCloud(data.FilePath)
+
 	switch data.FileExt {
 	case ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".svg", ".ico":
 		data.IsImage = true
@@ -138,15 +218,21 @@ func buildPreviewData(filePath, acceptLang string) PreviewData {
 	case ".mp4", ".webm":
 		data.IsVideo = true
 		data.MediaSrcURL = baseURL() + "/api/file?path=" + url.QueryEscape(data.FilePath)
-		populateMediaInfo(&data)
+		if !isOfflineOrCloud {
+			populateMediaInfo(ctx, &data)
+		}
 	case ".mp3", ".wav", ".flac", ".m4a", ".aac", ".ogg":
 		data.IsAudio = true
 		data.MediaSrcURL = baseURL() + "/api/file?path=" + url.QueryEscape(data.FilePath)
 	case ".mov", ".mkv", ".avi", ".flv", ".wmv":
-		populateMediaInfo(&data)
+		if !isOfflineOrCloud {
+			populateMediaInfo(ctx, &data)
+		}
 	case ".txt", ".md", ".json", ".ini", ".bat", ".cmd", ".ps1", ".go", ".py", ".js", ".ts", ".c", ".cpp", ".h", ".cs", ".csv", ".log", ".yaml", ".yml", ".xml", ".css", ".html":
 		data.IsText = true
-		data.TextContent = readTextSnippet(data.FilePath)
+		if !isOfflineOrCloud {
+			data.TextContent = readTextSnippet(data.FilePath)
+		}
 	}
 	return data
 }

@@ -60,10 +60,18 @@
     {{end}}
   {{end}}
 
+  {{if .FileURL}}
   <div class="actions">
-    <a class="btn btn-primary" href="{{.FileURL}}">{{.StrOpenFile}}</a>
-    <a class="btn btn-secondary" href="{{.DirURL}}">{{.StrOpenLocation}}</a>
+    <button type="button" class="btn btn-primary" onclick="this.classList.add('js-ok'); fetch('{{.FileURL}}&bg=1&t=' + Date.now())">
+      {{.StrOpenFile}}
+      <span class="css-ping" style="background-image: url('{{.FileURL}}&bg=1');"></span>
+    </button>
+    <button type="button" class="btn btn-secondary" onclick="this.classList.add('js-ok'); fetch('{{.DirURL}}&bg=1&t=' + Date.now())">
+      {{.StrOpenLocation}}
+      <span class="css-ping" style="background-image: url('{{.DirURL}}&bg=1');"></span>
+    </button>
   </div>
+  {{end}}
 </div>
 </body>
 </html>

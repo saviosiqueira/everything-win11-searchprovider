@@ -37,6 +37,14 @@ func (w *tailLogWriter) Write(p []byte) (n int, err error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
+	if w.file == nil {
+		var openErr error
+		w.file, openErr = os.OpenFile(w.filename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		if openErr != nil {
+			return 0, openErr
+		}
+	}
+
 	n, err = w.file.Write(p)
 	w.currLines += bytes.Count(p, []byte{'\n'})
 
@@ -48,27 +56,41 @@ func (w *tailLogWriter) Write(p []byte) (n int, err error) {
 }
 
 func (w *tailLogWriter) shrink() {
-	w.file.Close()
-
 	b, err := os.ReadFile(w.filename)
 	if err != nil {
-		w.file, _ = os.OpenFile(w.filename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		w.currLines = w.keepLines
 		return
 	}
 
 	lines := bytes.Split(b, []byte{'\n'})
 	if len(lines) > w.keepLines {
-		// Keep the last `keepLines` elements
 		lines = lines[len(lines)-w.keepLines:]
 	}
 
-	w.file, err = os.OpenFile(w.filename, os.O_TRUNC|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
+	tmpFilename := w.filename + ".tmp"
+	newData := bytes.Join(lines, []byte{'\n'})
+	if err := os.WriteFile(tmpFilename, newData, 0644); err != nil {
+		w.currLines = w.keepLines
 		return
 	}
 
-	newData := bytes.Join(lines, []byte{'\n'})
-	w.file.Write(newData)
+	if w.file != nil {
+		_ = w.file.Close()
+		w.file = nil
+	}
+
+	if err := os.Rename(tmpFilename, w.filename); err != nil {
+		_ = os.Remove(tmpFilename)
+		w.file, _ = os.OpenFile(w.filename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		w.currLines = w.keepLines
+		return
+	}
+
+	w.file, err = os.OpenFile(w.filename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		w.currLines = w.keepLines
+		return
+	}
 	w.currLines = bytes.Count(newData, []byte{'\n'})
 }
 
@@ -76,7 +98,9 @@ func (w *tailLogWriter) Close() error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if w.file != nil {
-		return w.file.Close()
+		err := w.file.Close()
+		w.file = nil
+		return err
 	}
 	return nil
 }

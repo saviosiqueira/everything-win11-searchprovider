@@ -16,11 +16,42 @@ import (
 	"time"
 )
 
-func launchPath(filePath string) error {
-	dir := filepath.Dir(filePath)
-	cmd := exec.Command("cmd", "/c", "start", "/d", dir, "", filePath)
-	cmd.Dir = dir
-	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+const (
+	invalidFileAttributes           = 0xFFFFFFFF
+	fileAttributeOffline            = 0x00001000
+	fileAttributeRecallOnOpen       = 0x00040000
+	fileAttributeRecallOnDataAccess = 0x00400000
+)
+
+var ffprobeSem = make(chan struct{}, 1)
+
+func isFileOfflineOrCloud(path string) bool {
+	if path == "" {
+		return false
+	}
+	ptr, err := syscall.UTF16PtrFromString(path)
+	if err != nil {
+		return false
+	}
+	attrs, err := syscall.GetFileAttributes(ptr)
+	if err != nil || attrs == invalidFileAttributes {
+		return false
+	}
+	cloudFlags := uint32(fileAttributeOffline | fileAttributeRecallOnOpen | fileAttributeRecallOnDataAccess)
+	return (attrs & cloudFlags) != 0
+}
+
+func launchPath(filePath string, selectInExplorer bool) error {
+	var cmd *exec.Cmd
+	if selectInExplorer {
+		cmd = exec.Command("explorer.exe", "/select,"+filePath)
+	} else {
+		cmd = exec.Command("explorer.exe", filePath)
+	}
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		HideWindow:    true,
+		CreationFlags: createNoWindow,
+	}
 	return cmd.Start()
 }
 
@@ -31,7 +62,7 @@ func handleProtocolActivation(rawURI string) {
 	}
 	filePath := u.Query().Get("path")
 	if filePath != "" {
-		_ = launchPath(filePath)
+		_ = launchPath(filePath, true)
 	}
 }
 
@@ -114,7 +145,7 @@ func readTextSnippet(filePath string) string {
 	return string(buf[:n])
 }
 
-func populateFileInfo(data *PreviewData, filePath string) {
+func populateFileInfo(ctx context.Context, data *PreviewData, filePath string) {
 	info, err := os.Stat(filePath)
 	if err == nil {
 		data.FileName = info.Name()
@@ -127,11 +158,14 @@ func populateFileInfo(data *PreviewData, filePath string) {
 		data.FileDate = info.ModTime().Format("2006-01-02 15:04:05")
 		data.FileExt = strings.ToLower(filepath.Ext(info.Name()))
 		data.FileURL = baseURL() + "/api/open?path=" + url.QueryEscape(filePath)
-		data.DirURL = baseURL() + "/api/open?path=" + url.QueryEscape(filepath.Dir(filePath))
+		data.DirURL = baseURL() + "/api/open?select=1&path=" + url.QueryEscape(filePath)
 		data.DirPath = filepath.Dir(filePath)
 	} else {
-		results := searchEverythingDetailed(filePath, 1)
-		if len(results) > 0 {
+		if filepath.IsAbs(filePath) {
+			return
+		}
+		results, err := searchEverythingDetailed(ctx, filePath, 1)
+		if err == nil && len(results) > 0 {
 			d := results[0]
 			data.FileName = d.name
 			data.FilePath = d.path
@@ -156,23 +190,34 @@ func populateFileInfo(data *PreviewData, filePath string) {
 
 			data.FileExt = strings.ToLower(filepath.Ext(d.name))
 			data.FileURL = baseURL() + "/api/open?path=" + url.QueryEscape(d.path)
-			data.DirURL = baseURL() + "/api/open?path=" + url.QueryEscape(filepath.Dir(d.path))
+			data.DirURL = baseURL() + "/api/open?select=1&path=" + url.QueryEscape(d.path)
 			data.DirPath = filepath.Dir(d.path)
 		}
 	}
 }
 
-func populateMediaInfo(data *PreviewData) {
+func populateMediaInfo(ctx context.Context, data *PreviewData) {
 	exe, err := exec.LookPath("ffprobe")
 	if err != nil {
 		return
 	}
 
-	ctx, contextCancel := context.WithTimeout(context.Background(), 1*time.Second)
-	defer contextCancel()
+	select {
+	case ffprobeSem <- struct{}{}:
+		defer func() { <-ffprobeSem }()
+	case <-ctx.Done():
+		return
+	}
 
-	cmd := exec.CommandContext(ctx, exe, "-v", "quiet", "-print_format", "json", "-show_format", "-show_streams", data.FilePath)
-	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	ffprobeCtx, cancel := context.WithTimeout(ctx, 1*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ffprobeCtx, exe, "-v", "quiet", "-print_format", "json", "-show_format", "-show_streams", data.FilePath)
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		HideWindow:    true,
+		CreationFlags: createNoWindow,
+	}
+	cmd.WaitDelay = 200 * time.Millisecond
 
 	out, err := cmd.Output()
 	if err != nil {
