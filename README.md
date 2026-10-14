@@ -21,8 +21,6 @@
 - **Fully working Previews**: Complete preview pane with file metadata, video/audio playback, text file preview, and quick actions ("Open File" and "Open Location").
 - **Multilingual Support**: Auto-detects system language with translations available for English, Spanish, and Brazilian Portuguese as a basis.
 
-_(Note: The buttons in preview do work, but only by opening a browser to actually do anything, I tried working around this, but couldn't figure out, i've left it there if anyone want to try messing with it.)_
-
 ---
 
 ## Requirements
