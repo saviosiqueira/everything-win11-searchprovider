@@ -14,6 +14,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	"unicode/utf8"
+	"unsafe"
 )
 
 const (
@@ -21,9 +23,54 @@ const (
 	fileAttributeOffline            = 0x00001000
 	fileAttributeRecallOnOpen       = 0x00040000
 	fileAttributeRecallOnDataAccess = 0x00400000
+
+	cpACP   = 0
+	cpOEMCP = 1
 )
 
-var ffprobeSem = make(chan struct{}, 1)
+var (
+	ffprobeSem              = make(chan struct{}, 1)
+	kernel32                = syscall.NewLazyDLL("kernel32.dll")
+	procMultiByteToWideChar = kernel32.NewProc("MultiByteToWideChar")
+)
+
+func decodeWindowsBytes(b []byte, codePage uint32) string {
+	if len(b) == 0 {
+		return ""
+	}
+	r0, _, _ := procMultiByteToWideChar.Call(
+		uintptr(codePage),
+		0,
+		uintptr(unsafe.Pointer(&b[0])),
+		uintptr(len(b)),
+		0,
+		0,
+	)
+	n := int(r0)
+	if n <= 0 {
+		return string(b)
+	}
+	buf := make([]uint16, n)
+	r1, _, _ := procMultiByteToWideChar.Call(
+		uintptr(codePage),
+		0,
+		uintptr(unsafe.Pointer(&b[0])),
+		uintptr(len(b)),
+		uintptr(unsafe.Pointer(&buf[0])),
+		uintptr(n),
+	)
+	if int(r1) <= 0 {
+		return string(b)
+	}
+	return syscall.UTF16ToString(buf)
+}
+
+func ensureUTF8(s string) string {
+	if utf8.ValidString(s) {
+		return s
+	}
+	return decodeWindowsBytes([]byte(s), cpOEMCP)
+}
 
 func isFileOfflineOrCloud(path string) bool {
 	if path == "" {
@@ -142,7 +189,11 @@ func readTextSnippet(filePath string) string {
 	if bytes.IndexByte(buf[:n], 0) != -1 {
 		return ""
 	}
-	return string(buf[:n])
+	data := buf[:n]
+	if !utf8.Valid(data) {
+		return decodeWindowsBytes(data, cpACP)
+	}
+	return string(data)
 }
 
 func populateFileInfo(ctx context.Context, data *PreviewData, filePath string) {

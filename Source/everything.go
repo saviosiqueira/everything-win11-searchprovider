@@ -14,6 +14,7 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	"unicode/utf8"
 )
 
 const createNoWindow = 0x08000000
@@ -248,6 +249,12 @@ func parseSearchOutput(output string, limit int) []detailedResult {
 			continue
 		}
 
+		rawLine := line
+		isNonUTF8 := !utf8.ValidString(line)
+		if isNonUTF8 {
+			line = decodeWindowsBytes([]byte(line), cpOEMCP)
+		}
+
 		loc := datePattern.FindStringIndex(line)
 		if loc == nil {
 			continue
@@ -260,6 +267,19 @@ func parseSearchOutput(output string, limit int) []detailedResult {
 		if pathPart == "" {
 			continue
 		}
+
+		if isNonUTF8 {
+			if _, err := os.Stat(pathPart); err != nil {
+				acpLine := decodeWindowsBytes([]byte(rawLine), cpACP)
+				if acpLoc := datePattern.FindStringIndex(acpLine); acpLoc != nil {
+					acpPath := strings.TrimSpace(acpLine[acpLoc[1]:])
+					if _, err := os.Stat(acpPath); err == nil {
+						pathPart = acpPath
+					}
+				}
+			}
+		}
+
 		dr.path = pathPart
 		dr.name = filepath.Base(dr.path)
 		results = append(results, dr)

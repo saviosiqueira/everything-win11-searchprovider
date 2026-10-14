@@ -18,7 +18,7 @@
   <Identity
     Name="EverythingSearchProvider"
     Publisher="CN=EverythingSearch_LocalDev_DO_NOT_TRUST"
-    Version="1.1.0.0" />
+    Version="1.1.0.1" />
 
   <Properties>
     <DisplayName>ms-resource:AppName</DisplayName>
